@@ -32,7 +32,7 @@ reset_seed(n=42)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 pretrained_path = 'facebook/sam-vit-base'
 
-model = SAM(pretrained_path, num_classes=5, lora_regex=mask_decoder_regex, lora_rank=60)
+model = SAM(pretrained_path, num_classes=5, lora_regex=mask_decoder_regex, lora_rank=10)
 
 root, annFile = '../data/train', '../data/annotations/train.json'
 trainset = SAMDataset(root, annFile, pretrained_path)
@@ -53,7 +53,6 @@ cfg = {'trainloader': trainloader,
        'device': device, 
        'metric': metric}
 
-vLoss, vScores = model.fit(cfg)
+vScores = model.fit(cfg)
 
-print(vLoss)
 print(vScores)

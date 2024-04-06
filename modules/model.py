@@ -55,6 +55,7 @@ class SAM(nn.Module):
         self.model = SamModel.from_pretrained(pretrained_path)
         self.model = replace_decoder(self.model, num_classes)
         self.model = get_lora(self.model, lora_regex, lora_rank)
+        self.model = nn.DataParallel(self.model)
         
     def forward(self, pixel_values, output_shape):
         outputs = self.model(pixel_values=pixel_values, multimask_output=True)
@@ -68,24 +69,24 @@ class SAM(nn.Module):
         self._configureMetric(cfg['metric'])
         self.model.to(self.device)
 
-        bestLoss, bestScores = 1000, []
+        bestScores = {'loss': 10000}
         with tqdm(range(cfg['epochs']), desc='Training') as tepoch:
             for epoch in tepoch:
                 self.model.train(True)
-                tLoss, tScores = self.epoch(cfg['trainloader'], update=True)
+                tScores = self.epoch(cfg['trainloader'], update=True)
 
                 self.model.eval()
                 with torch.no_grad():
-                    vLoss, vScores = self.epoch(cfg['valloader'], update=False)
+                    vScores = self.epoch(cfg['valloader'], update=False)
 
-                if vLoss < bestLoss:
+                if vScores['loss'] < bestScores['loss']:
                     self.save(cfg['save_path'])
-                    bestLoss, bestScores = vLoss, vScores
+                    bestScores = vScores
             
-                tepoch.set_postfix(tLoss=tLoss, tScores=tScores, vLoss=vLoss, vScores=vScores)
+                tepoch.set_postfix(tScores=tScores, vScores=vScores)
 
         self.load(cfg['save_path'])
-        return bestLoss, bestScores
+        return bestScores
 
     def epoch(self, dataloader, update=False):
         mean_loss = 0
@@ -106,11 +107,11 @@ class SAM(nn.Module):
                 mean_loss += loss.item()
                 self.metrics.update(logit.detach().cpu(), true_mask.cpu())
 
-                tepoch.set_postfix(loss=loss.item())
+                tepoch.set_postfix(loss = loss.item())
 
         scores = self.metrics.compute()
-        mean_loss = mean_loss / len(dataloader)
-        return mean_loss, scores
+        scores['loss'] = mean_loss / len(dataloader)
+        return scores
     
     def _updateWeights(self, loss):
         self.optimizer.zero_grad()
