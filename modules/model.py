@@ -1,8 +1,11 @@
 
+from tqdm import tqdm
 import re as regex
 
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.optim import AdamW
 
 from peft import LoraConfig, get_peft_model
 from transformers.models.sam.modeling_sam import SamModel, SamMaskDecoder
@@ -17,7 +20,7 @@ def replace_decoder(model, num_classes):
     mask_decoder_config['num_multimask_outputs'] = num_classes
     model.config.mask_decoder_config.update(mask_decoder_config)
     
-    # preserve weights
+    # preserve some weights
     custom_decoder = SamMaskDecoder(model.config.mask_decoder_config)
     custom_decoder.transformer = model.mask_decoder.transformer
     custom_decoder.upscale_conv1 = model.mask_decoder.upscale_conv1
@@ -52,16 +55,82 @@ class SAM(nn.Module):
         self.model = replace_decoder(self.model, num_classes)
         self.model = get_lora(self.model, lora_regex, lora_rank)
         
-        self.loss = nn.CrossEntropyLoss(ignore_index=0)
-        
     def forward(self, pixel_values, output_shape):
         outputs = self.model(pixel_values=pixel_values, multimask_output=True)
         logit = F.interpolate(outputs.pred_masks, output_shape, mode='bilinear', align_corners=False)
         return logit
+    
+    def fit(self, cfg):
+        self._configureDevice(cfg['device'])
+        self._configureOptimizer(cfg['lr'])
+        self._configureMetric(cfg['metric'])
 
+        bestLoss, bestScores = 1000, []
+        with tqdm(range(cfg['epochs']), desc='Training') as tepoch:
+            self.model.train(True)
+            tLoss, tScores = self.epoch(cfg['trainloader'], update=True)
+
+            self.model.eval()
+            with torch.no_grad():
+                vLoss, vScores = self.epoch(cfg['valloader'], update=False)
+
+            if vLoss < bestLoss:
+                self.save(cfg['save_path'])
+                bestLoss, bestScores = vLoss, vScores
+            
+            tepoch.set_postfix(tLoss=tLoss, tScores=tScores, vLoss=vLoss, vScores=vScores)
+
+        self.load(cfg['save_path'])
+        return bestLoss, bestScores
+
+    def epoch(self, dataloader, update=False):
+        mean_loss = 0
+        self.metrics.reset()
+
+        for image, true_mask in dataloader:
+            image = image.to(self.device)
+            true_mask = true_mask.to(self.device)
+
+            _, h, w = true_mask.shape
+            logit = self.forward(image, output_shape=(h,w))
+            
+            loss = self.loss(logit, true_mask)
+            if update:
+                self.__updateWeights(loss)
+            
+            mean_loss += loss.item()
+            self.metric.update(logit, true_mask)
+
+        scores = self.metrics.compute()
+        mean_loss = mean_loss / len(dataloader)
+        return mean_loss, scores
     
+    def __updateWeights(self, loss):
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return None
+
+    def _configureOptimizer(self, lr):
+        self.optimizer = AdamW(self.model.parameters(), lr=lr)
+        self.loss = nn.CrossEntropyLoss(ignore_index=0)
+        return None
     
+    def _configureDevice(self, device):
+        self.device = device
+        return None
     
-    
-        
-                                           
+    def _configureMetric(self, metric):
+        self.metric = metric
+        return None
+
+    def save(self, path):
+        state = self.model.state_dict()
+        for name in list(state.keys()):
+            if "lora" not in name:
+                state.pop(name)
+        return torch.save(state, path)
+
+    def load(self, path):
+        state = torch.load(path)
+        return self.model.load_state_dict(state)

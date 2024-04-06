@@ -5,6 +5,7 @@ import numpy as np
 import random
 import torch
 
+from torchmetrics import JaccardIndex
 from torch.utils.data import DataLoader
 from modules.dataset import SAMDataset
 from modules.model import (SAM, 
@@ -39,12 +40,15 @@ root, annFile = '../data/val', '../data/annotations/val.json'
 valset = SAMDataset(root, annFile, pretrained_path)
 valloader = DataLoader(valset, batch_size=args.batch_size, shuffle=False)
 
+metric = JaccardIndex(task='multiclass', num_classes=5)
+
 cfg = {'trainloader': trainloader, 
        'valloader': valloader, 
        'epochs': args.epochs, 
        'lr': args.lr,
        'save_path': args.save_path, 
-       'device': device}
+       'device': device, 
+       'metric': metric}
 
 vLoss, vScores = model.fit(cfg)
 
