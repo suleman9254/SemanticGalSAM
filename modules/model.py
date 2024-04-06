@@ -91,33 +91,37 @@ class SAM(nn.Module):
         mean_loss = 0
         self.metrics.reset()
         
-        for image, true_mask in tqdm(dataloader, desc='Epoch', leave=False):
-            image = image.to(self.device)
-            true_mask = true_mask.to(self.device)
+        with tqdm(dataloader, desc='Epoch', leave=False) as tepoch:
+            for image, true_mask in tepoch:
+                image = image.to(self.device)
+                true_mask = true_mask.to(self.device)
 
-            _, h, w = true_mask.shape
-            logit = self.forward(image, output_shape=(h,w))
-            
-            loss = self.loss(logit, true_mask)
-            if update:
-                self.__updateWeights(loss)
-            
-            mean_loss += loss.item()
-            self.metrics.update(logit.detach().cpu(), true_mask.cpu())
+                _, h, w = true_mask.shape
+                logit = self.forward(image, output_shape=(h,w))
+                
+                loss = self.loss(logit, true_mask)
+                if update:
+                    self._updateWeights(loss)
+                
+                mean_loss += loss.item()
+                self.metrics.update(logit.detach().cpu(), true_mask.cpu())
+
+                tepoch.set_postfix(loss=loss.item())
 
         scores = self.metrics.compute()
         mean_loss = mean_loss / len(dataloader)
         return mean_loss, scores
     
-    def __updateWeights(self, loss):
+    def _updateWeights(self, loss):
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
         return None
 
     def _configureOptimizer(self, lr):
-        self.optimizer = AdamW(self.model.parameters(), lr=lr)
-        self.loss = nn.CrossEntropyLoss(ignore_index=0)
+        params = [p for p in self.model.parameters() if p.requires_grad]
+        self.optimizer = AdamW(params, lr=lr)
+        self.loss = nn.CrossEntropyLoss()
         return None
     
     def _configureDevice(self, device):
@@ -129,10 +133,7 @@ class SAM(nn.Module):
         return None
 
     def save(self, path):
-        state = self.model.state_dict()
-        for name in list(state.keys()):
-            if "lora" not in name:
-                state.pop(name)
+        state = {n: p for n, p in self.model.named_parameters() if p.requires_grad}
         return torch.save(state, path)
 
     def load(self, path):
