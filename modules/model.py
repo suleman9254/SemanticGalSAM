@@ -57,10 +57,9 @@ class SAM(nn.Module):
         self.model = get_lora(self.model, lora_regex, lora_rank)
         
     def forward(self, pixel_values, output_shape):
-        print(pixel_values.shape)
-
         outputs = self.model(pixel_values=pixel_values, multimask_output=True)
-        logit = F.interpolate(outputs.pred_masks, output_shape, mode='bilinear', align_corners=False)
+        logit = torch.squeeze(outputs.pred_masks)
+        logit = F.interpolate(logit, output_shape, mode='bilinear', align_corners=False)
         return logit
     
     def fit(self, cfg):
@@ -90,8 +89,8 @@ class SAM(nn.Module):
     def epoch(self, dataloader, update=False):
         mean_loss = 0
         self.metrics.reset()
-
-        for image, true_mask in dataloader:
+        
+        for image, true_mask in tqdm(dataloader, desc='Epoch', leave=False):
             image = image.to(self.device)
             true_mask = true_mask.to(self.device)
 
@@ -103,7 +102,7 @@ class SAM(nn.Module):
                 self.__updateWeights(loss)
             
             mean_loss += loss.item()
-            self.metrics.update(logit, true_mask)
+            self.metrics.update(logit.detach().cpu(), true_mask.cpu())
 
         scores = self.metrics.compute()
         mean_loss = mean_loss / len(dataloader)

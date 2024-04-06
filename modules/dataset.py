@@ -13,13 +13,14 @@ class SAMDataset(Dataset):
         img, ann = self.dataset[idx]
         target = self.__makeTarget__(ann)
         input = self.processor(img, return_tensors="pt")
-        return input['pixel_values'], target
+        pixel_values = torch.squeeze(input['pixel_values'])
+        return pixel_values, target
         
     def __makeTarget__(self, ann):
         masks, labels = ann['masks'], ann['labels']
 
         _, h, w = masks.shape # anticipating earlier transforms
-        target = torch.zeros((h, w), dtype=torch.float)
+        target = torch.zeros((h, w), dtype=torch.long)
         for m, c in zip(masks, labels):
             target[m == 1] = c
         return target
