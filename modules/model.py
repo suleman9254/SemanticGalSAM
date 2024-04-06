@@ -51,11 +51,14 @@ def get_lora(model, lora_regex, lora_rank):
 
 class SAM(nn.Module):
     def __init__(self, pretrained_path, num_classes, lora_regex, lora_rank):
+        super().__init__()
         self.model = SamModel.from_pretrained(pretrained_path)
         self.model = replace_decoder(self.model, num_classes)
         self.model = get_lora(self.model, lora_regex, lora_rank)
         
     def forward(self, pixel_values, output_shape):
+        print(pixel_values.shape)
+
         outputs = self.model(pixel_values=pixel_values, multimask_output=True)
         logit = F.interpolate(outputs.pred_masks, output_shape, mode='bilinear', align_corners=False)
         return logit
@@ -64,6 +67,7 @@ class SAM(nn.Module):
         self._configureDevice(cfg['device'])
         self._configureOptimizer(cfg['lr'])
         self._configureMetric(cfg['metric'])
+        self.model.to(self.device)
 
         bestLoss, bestScores = 1000, []
         with tqdm(range(cfg['epochs']), desc='Training') as tepoch:
@@ -99,7 +103,7 @@ class SAM(nn.Module):
                 self.__updateWeights(loss)
             
             mean_loss += loss.item()
-            self.metric.update(logit, true_mask)
+            self.metrics.update(logit, true_mask)
 
         scores = self.metrics.compute()
         mean_loss = mean_loss / len(dataloader)
@@ -120,8 +124,8 @@ class SAM(nn.Module):
         self.device = device
         return None
     
-    def _configureMetric(self, metric):
-        self.metric = metric
+    def _configureMetric(self, metrics):
+        self.metrics = metrics
         return None
 
     def save(self, path):

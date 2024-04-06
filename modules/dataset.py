@@ -13,7 +13,7 @@ class SAMDataset(Dataset):
         img, ann = self.dataset[idx]
         target = self.__makeTarget__(ann)
         input = self.processor(img, return_tensors="pt")
-        return input, target
+        return input['pixel_values'], target
         
     def __makeTarget__(self, ann):
         masks, labels = ann['masks'], ann['labels']
