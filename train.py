@@ -15,10 +15,10 @@ from modules.model import (SAM,
 
 from argparse import ArgumentParser
 parser = ArgumentParser()
-parser.add_argument('--epochs', type=int, required=True)
 parser.add_argument('--lr', type=float, required=True)
-parser.add_argument('--batch_size', type=int, required=True)
+parser.add_argument('--epochs', type=int, required=True)
 parser.add_argument('--save_path', type=str, required=True)
+parser.add_argument('--batch_size', type=int, required=True)
 args = parser.parse_args()
 
 def reset_seed(n):

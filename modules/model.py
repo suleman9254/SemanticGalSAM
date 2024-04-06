@@ -58,7 +58,7 @@ class SAM(nn.Module):
         
     def forward(self, pixel_values, output_shape):
         outputs = self.model(pixel_values=pixel_values, multimask_output=True)
-        logit = torch.squeeze(outputs.pred_masks)
+        logit = torch.squeeze(outputs.pred_masks, dim=1)
         logit = F.interpolate(logit, output_shape, mode='bilinear', align_corners=False)
         return logit
     
@@ -70,18 +70,19 @@ class SAM(nn.Module):
 
         bestLoss, bestScores = 1000, []
         with tqdm(range(cfg['epochs']), desc='Training') as tepoch:
-            self.model.train(True)
-            tLoss, tScores = self.epoch(cfg['trainloader'], update=True)
+            for epoch in tepoch:
+                self.model.train(True)
+                tLoss, tScores = self.epoch(cfg['trainloader'], update=True)
 
-            self.model.eval()
-            with torch.no_grad():
-                vLoss, vScores = self.epoch(cfg['valloader'], update=False)
+                self.model.eval()
+                with torch.no_grad():
+                    vLoss, vScores = self.epoch(cfg['valloader'], update=False)
 
-            if vLoss < bestLoss:
-                self.save(cfg['save_path'])
-                bestLoss, bestScores = vLoss, vScores
+                if vLoss < bestLoss:
+                    self.save(cfg['save_path'])
+                    bestLoss, bestScores = vLoss, vScores
             
-            tepoch.set_postfix(tLoss=tLoss, tScores=tScores, vLoss=vLoss, vScores=vScores)
+                tepoch.set_postfix(tLoss=tLoss, tScores=tScores, vLoss=vLoss, vScores=vScores)
 
         self.load(cfg['save_path'])
         return bestLoss, bestScores
@@ -136,4 +137,4 @@ class SAM(nn.Module):
 
     def load(self, path):
         state = torch.load(path)
-        return self.model.load_state_dict(state)
+        return self.model.load_state_dict(state, strict=False)

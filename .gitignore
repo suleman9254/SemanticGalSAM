@@ -2,3 +2,6 @@
 modules/.ipynb_checkpoints/dataset-checkpoint.py
 modules/.ipynb_checkpoints/model_2-checkpoint.py
 modules/.ipynb_checkpoints/model-checkpoint.py
+dummy.ckpt
+modules/__pycache__/dataset.cpython-310.pyc
+modules/__pycache__/model.cpython-310.pyc
