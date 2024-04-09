@@ -10,10 +10,7 @@ from torch.optim import AdamW
 from peft import LoraConfig, get_peft_model
 from transformers.models.sam.modeling_sam import SamModel, SamMaskDecoder
 
-mask_decoder_regex = r'^mask_decoder\.transformer.*(?:self_attn\.(v|q)_proj|cross_attn_token_to_image\.(q|v)_proj|cross_attn_image_to_token\.(q|v)_proj|final_attn_token_to_image\.(q|v)_proj).*'
-vision_encoder_regex = r'^vision_encoder\.layers.*(attn\.qkv).*'
-mask_decover_vision_encoder_regex = regex.compile(f"{vision_encoder_regex}|{mask_decoder_regex}")
-prediction_head_regex = r'^mask_decoder.*(?:iou_prediction_head|output_hypernetworks_mlps|mask_tokens).*'
+from modules.utils import regex_parameter_search, prediction_head_regex
 
 def replace_decoder(model, num_classes):
     mask_decoder_config = model.config.mask_decoder_config.to_dict()
@@ -30,31 +27,23 @@ def replace_decoder(model, num_classes):
     model.mask_decoder = custom_decoder
     return model
 
-def get_module_list(model, reg_exp):
-    target_modules = set()
-    for name, _ in model.named_parameters():
-        if regex.search(reg_exp, name):
-            codeword = regex.sub(r'\.(weight|bias)$', '', name)
-            target_modules.add(codeword)
-    
-    return target_modules
-
-def get_lora(model, lora_regex, lora_rank):            
-    target_modules = get_module_list(model, lora_regex)
-    modules_to_save = get_module_list(model, prediction_head_regex)
+def make_lora(model, lora_regex, lora_rank, lora_alpha):            
+    target_modules = regex_parameter_search(model, lora_regex)
+    modules_to_save = regex_parameter_search(model, prediction_head_regex)
 
     config = LoraConfig(r=lora_rank, 
+                        lora_alpha=lora_alpha,
                         modules_to_save=modules_to_save, 
                         target_modules=target_modules)
     
     return get_peft_model(model, config)
 
 class SAM(nn.Module):
-    def __init__(self, pretrained_path, num_classes, lora_regex, lora_rank):
+    def __init__(self, pretrained_path, num_classes, lora_regex, lora_rank, lora_alpha):
         super().__init__()
         self.model = SamModel.from_pretrained(pretrained_path)
         self.model = replace_decoder(self.model, num_classes)
-        self.model = get_lora(self.model, lora_regex, lora_rank)
+        self.model = make_lora(self.model, lora_regex, lora_rank, lora_alpha)
         self.model = nn.DataParallel(self.model)
         
     def forward(self, pixel_values, output_shape):
@@ -72,18 +61,26 @@ class SAM(nn.Module):
         bestScores = {'loss': 10000}
         with tqdm(range(cfg['epochs']), desc='Training') as tepoch:
             for epoch in tepoch:
+                print(f'\nEpoch {epoch}')
+
                 self.model.train(True)
                 tScores = self.epoch(cfg['trainloader'], update=True)
+
+                print('Train Metrics:')
+                print(tScores)
 
                 self.model.eval()
                 with torch.no_grad():
                     vScores = self.epoch(cfg['valloader'], update=False)
 
+                print('Validation Metrics:')
+                print(tScores)
+
                 if vScores['loss'] < bestScores['loss']:
                     self.save(cfg['save_path'])
                     bestScores = vScores
             
-                tepoch.set_postfix(tScores=tScores, vScores=vScores)
+                tepoch.set_postfix(tLoss=tScores['loss'], vLoss=vScores['loss'])
 
         self.load(cfg['save_path'])
         return bestScores
@@ -107,7 +104,7 @@ class SAM(nn.Module):
                 mean_loss += loss.item()
                 self.metrics.update(logit.detach().cpu(), true_mask.cpu())
 
-                tepoch.set_postfix(loss = loss.item())
+                tepoch.set_postfix(batch_loss = loss.item())
 
         scores = self.metrics.compute()
         scores['loss'] = mean_loss / len(dataloader)
