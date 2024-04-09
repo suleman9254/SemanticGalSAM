@@ -1,6 +1,6 @@
 
 from tqdm import tqdm
-import re as regex
+import wandb
 
 import torch
 import torch.nn as nn
@@ -61,8 +61,6 @@ class SAM(nn.Module):
         bestScores = {'loss': 10000}
         with tqdm(range(cfg['epochs']), desc='Training') as tepoch:
             for epoch in tepoch:
-                print(f'\nEpoch {epoch}')
-
                 self.model.train(True)
                 tScores = self.epoch(cfg['trainloader'], update=True)
 
@@ -79,6 +77,9 @@ class SAM(nn.Module):
                 if vScores['loss'] < bestScores['loss']:
                     self.save(cfg['save_path'])
                     bestScores = vScores
+
+                if cfg['wandb']:
+                    wandb.log({'train': tScores, 'val': vScores, 'epoch': epoch})
             
                 tepoch.set_postfix(tLoss=tScores['loss'], vLoss=vScores['loss'])
 
