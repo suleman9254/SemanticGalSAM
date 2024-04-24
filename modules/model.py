@@ -7,43 +7,36 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim import AdamW
 
-from peft import LoraConfig, get_peft_model
-from transformers.models.sam.modeling_sam import SamModel, SamMaskDecoder
+from modules.build_sam import build_sam
+from modules.lora import build_lora
 
-from modules.utils import regex_parameter_search, prediction_head_regex
+from statistics import mean
 
-def replace_decoder(model, num_classes):
-    mask_decoder_config = model.config.mask_decoder_config.to_dict()
-    mask_decoder_config['num_multimask_outputs'] = num_classes
-    model.config.mask_decoder_config.update(mask_decoder_config)
-    
-    # preserve some weights
-    custom_decoder = SamMaskDecoder(model.config.mask_decoder_config)
-    custom_decoder.transformer = model.mask_decoder.transformer
-    custom_decoder.upscale_conv1 = model.mask_decoder.upscale_conv1
-    custom_decoder.upscale_conv2 = model.mask_decoder.upscale_conv2
-    custom_decoder.upscale_layer_norm = model.mask_decoder.upscale_layer_norm
-    
-    model.mask_decoder = custom_decoder
+def freeze_backbone(model):
+    for name, param in model.named_parameters():
+        if name.startswith("vision_encoder") or name.startswith("prompt_encoder"):
+            param.requires_grad_(False)
     return model
 
-def make_lora(model, lora_regex, lora_rank, lora_alpha):            
-    target_modules = regex_parameter_search(model, lora_regex)
-    modules_to_save = regex_parameter_search(model, prediction_head_regex)
-
-    config = LoraConfig(r=lora_rank, 
-                        lora_alpha=lora_alpha,
-                        modules_to_save=modules_to_save, 
-                        target_modules=target_modules)
-    
-    return get_peft_model(model, config)
-
 class SAM(nn.Module):
-    def __init__(self, pretrained_path, num_classes, lora_regex, lora_rank, lora_alpha):
+    def __init__(self, 
+                 pretrained_path, 
+                 num_classes, 
+                 image_size, 
+                 vit_patch_size, 
+                 lora_regex, 
+                 normal_regex,
+                 lora_rank, 
+                 lora_alpha):
+        
         super().__init__()
-        self.model = SamModel.from_pretrained(pretrained_path)
-        self.model = replace_decoder(self.model, num_classes)
-        self.model = make_lora(self.model, lora_regex, lora_rank, lora_alpha)
+        self.model = build_sam(pretrained_path, num_classes, image_size, vit_patch_size)
+
+        if lora_regex:
+            self.model = build_lora(self.model, lora_regex, normal_regex, lora_rank, lora_alpha)
+        else:
+            self.model = freeze_backbone(self.model)
+        
         self.model = nn.DataParallel(self.model)
         
     def forward(self, pixel_values, output_shape):
@@ -58,36 +51,34 @@ class SAM(nn.Module):
         self._configureMetric(cfg['metric'])
         self.model.to(self.device)
 
-        bestScores = {'loss': 10000}
+        bestScores = {'Loss': 10000}
         with tqdm(range(cfg['epochs']), desc='Training') as tepoch:
             for epoch in tepoch:
                 self.model.train(True)
                 tScores = self.epoch(cfg['trainloader'], update=True)
 
-                print('Train Metrics:')
-                print(tScores)
+                print(f'\nTrain Metrics: {tScores}.')
 
                 self.model.eval()
                 with torch.no_grad():
                     vScores = self.epoch(cfg['valloader'], update=False)
 
-                print('Validation Metrics:')
-                print(tScores)
+                print(f'\nValidation Metrics: {vScores}.')
 
-                if vScores['loss'] < bestScores['loss']:
+                if vScores['Loss'] < bestScores['Loss']:
                     self.save(cfg['save_path'])
                     bestScores = vScores
 
                 if cfg['wandb']:
                     wandb.log({'train': tScores, 'val': vScores, 'epoch': epoch})
             
-                tepoch.set_postfix(tLoss=tScores['loss'], vLoss=vScores['loss'])
+                tepoch.set_postfix(tLoss=tScores['Loss'], vLoss=vScores['Loss'])
 
         self.load(cfg['save_path'])
         return bestScores
 
     def epoch(self, dataloader, update=False):
-        mean_loss = 0
+        loss_hist = []
         self.metrics.reset()
         
         with tqdm(dataloader, desc='Epoch', leave=False) as tepoch:
@@ -102,13 +93,13 @@ class SAM(nn.Module):
                 if update:
                     self._updateWeights(loss)
                 
-                mean_loss += loss.item()
+                loss_hist.append(loss.item())
                 self.metrics.update(logit.detach().cpu(), true_mask.cpu())
-
-                tepoch.set_postfix(batch_loss = loss.item())
+                
+                tepoch.set_postfix(loss = mean(loss_hist))
 
         scores = self.metrics.compute()
-        scores['loss'] = mean_loss / len(dataloader)
+        scores['Loss'] = mean(loss_hist)
         return scores
     
     def _updateWeights(self, loss):
@@ -120,7 +111,7 @@ class SAM(nn.Module):
     def _configureOptimizer(self, lr):
         params = [p for p in self.model.parameters() if p.requires_grad]
         self.optimizer = AdamW(params, lr=lr)
-        self.loss = nn.CrossEntropyLoss()
+        self.loss = nn.CrossEntropyLoss(weight=torch.tensor([1, 3, 3, 3, 3], dtype=torch.float))
         return None
     
     def _configureDevice(self, device):
