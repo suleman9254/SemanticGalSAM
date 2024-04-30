@@ -1,4 +1,3 @@
-import torch
 import wandb
 
 from torch.utils.data import DataLoader
@@ -7,6 +6,8 @@ from modules.model import SAM
 from modules.lora import fetch_lora_regex
 from modules.utils import reset_seed, seed_worker, generator
 
+from accelerate import Accelerator
+from torchvision.transforms import v2
 from torchmetrics import Accuracy, F1Score, JaccardIndex, MetricCollection
 
 from argparse import ArgumentParser
@@ -25,7 +26,7 @@ args = parser.parse_args()
 
 reset_seed(n=42)
 generator.manual_seed(42)
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+accelerator = Accelerator()
 
 if args.wandb:
     wandb.login()
@@ -40,6 +41,15 @@ pretrained_path = 'facebook/sam-vit-base'
 save_path = f'saves/{args.savename}.ckpt'
 lora_regex, normal_layers = fetch_lora_regex(args.lora_layers)
 
+monitored_metric = 'MulticlassJaccardIndex'
+
+weight_decay = 0.1
+scheduler_patience = 5
+scheduler_threshold = 0.01
+early_stopping_patience = 10
+early_stopping_threshold = 0.01
+lambda_dice = 0.5
+
 model = SAM(pretrained_path, 
             num_classes=num_classes, 
             image_size=image_size, 
@@ -49,8 +59,9 @@ model = SAM(pretrained_path,
             lora_rank=args.lora_rank, 
             lora_alpha=args.lora_alpha)
 
+transforms = v2.Compose([v2.RandomRotation(degrees=180)])
 root, annFile = '../data/train', '../data/annotations/train.json'
-trainset = SAMDataset(root, annFile, image_size, means=[-1.8163, -1.9570, -1.7297], stds=[0.8139, 0.4834, 0.4621])
+trainset = SAMDataset(root, annFile, image_size, transforms=transforms, means=[-1.8163, -1.9570, -1.7297], stds=[0.8139, 0.4834, 0.4621])
 trainloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True, worker_init_fn=seed_worker, generator=generator)
 
 root, annFile = '../data/val', '../data/annotations/val.json'
@@ -66,8 +77,15 @@ cfg = {'trainloader': trainloader,
        'epochs': args.epochs, 
        'lr': args.lr,
        'save_path': save_path, 
-       'device': device, 
+       'accelerator': accelerator, 
        'metric': metric, 
+       'weight_decay': weight_decay, 
+       'scheduler_patience': scheduler_patience, 
+       'scheduler_threshold': scheduler_threshold, 
+       'lambda_dice': lambda_dice, 
+       'early_stopping_threshold': early_stopping_threshold, 
+       'early_stopping_patience': early_stopping_patience, 
+       'monitored_metric': monitored_metric,
        'wandb': args.wandb}
 
 vScores = model.fit(cfg)

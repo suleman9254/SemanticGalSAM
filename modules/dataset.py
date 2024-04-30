@@ -11,7 +11,7 @@ class SAMDataset(Dataset):
         self.dataset = RadioGalaxyNET(root, annFile, transform, transforms)
 
         self.processor = SamImageProcessor(image_mean=means, 
-                                           imag_stds=stds,
+                                           image_std=stds,
                                            size={"longest_edge": image_size}, 
                                            pad_size={"height": image_size, 
                                                      "width": image_size})

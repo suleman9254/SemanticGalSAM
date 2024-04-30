@@ -1,26 +1,20 @@
 import re as regex
 from peft import LoraConfig, get_peft_model
 
-def fetch_lora_regex(training_scheme):
-    vision_encoder_regex = r'^vision_encoder\.layers.*(attn\.qkv).*'
-    prediction_head_regex = r'^mask_decoder.*(?:iou_prediction_head|output_hypernetworks_mlps|mask_tokens).*'
-    mask_decoder_regex = r'^mask_decoder\.transformer.*(?:self_attn\.(v|q)_proj|cross_attn_token_to_image\.(q|v)_proj|cross_attn_image_to_token\.(q|v)_proj|final_attn_token_to_image\.(q|v)_proj).*'
+def fetch_lora_regex(layers):
+    lora_layers = normal_layers = None
+    
+    if layers == 'vision_encoder':
+        lora_layers = r'^vision_encoder\.layers.*(attn\.qkv).*'
+        normal_layers = r'^(mask_decoder|prompt_encoder).*?(weight|bias)$'
+    
+    elif layers == 'vision_encoder_mask_decoder':
+        lora_layers = r'^vision_encoder\.layers.*(attn\.qkv).*|^mask_decoder\.transformer.*(?:self_attn\.(v|q)_proj|cross_attn_token_to_image\.(q|v)_proj|cross_attn_image_to_token\.(q|v)_proj|final_attn_token_to_image\.(q|v)_proj).*'
+        normal_layers = r'^prompt_encoder.*?(weight|bias)$'
 
-    if training_scheme == 'vision_encoder':
-        return vision_encoder_regex, prediction_head_regex
-    elif training_scheme == 'vision_encoder_mask_decoder':
-        return [vision_encoder_regex, mask_decoder_regex], prediction_head_regex
-    else:
-        return None, None
-
-def join_regex(reg_exp_list):
-    reg_exp = '|'.join(reg_exp_list)
-    return regex.compile(reg_exp)
+    return lora_layers, normal_layers
 
 def regex_parameter_search(model, reg_exp):
-    if isinstance(reg_exp, list):
-        reg_exp = join_regex(reg_exp)
-
     target_modules = set()
     for name, _ in model.named_parameters():
         if regex.search(reg_exp, name):
