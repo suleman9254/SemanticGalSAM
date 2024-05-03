@@ -7,12 +7,10 @@ sys.path.append('/home/msuleman/ml20_scratch/fyp_galaxy')
 from base_dataset import RadioGalaxyNET
 
 class SAMDataset(Dataset):
-    def __init__(self, root, annFile, image_size, means, stds, transform=None, transforms=None):
+    def __init__(self, root, annFile, image_size, transform=None, transforms=None):
         self.dataset = RadioGalaxyNET(root, annFile, transform, transforms)
 
-        self.processor = SamImageProcessor(image_mean=means, 
-                                           image_std=stds,
-                                           size={"longest_edge": image_size}, 
+        self.processor = SamImageProcessor(size={"longest_edge": image_size}, 
                                            pad_size={"height": image_size, 
                                                      "width": image_size})
         self.processor = SamProcessor(self.processor)

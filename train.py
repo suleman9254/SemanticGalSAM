@@ -41,14 +41,14 @@ pretrained_path = 'facebook/sam-vit-base'
 save_path = f'saves/{args.savename}.ckpt'
 lora_regex, normal_layers = fetch_lora_regex(args.lora_layers)
 
-monitored_metric = 'MulticlassJaccardIndex'
-
-weight_decay = 0.1
+weight_decay = 0.015346716328972766
 scheduler_patience = 5
 scheduler_threshold = 0.01
 early_stopping_patience = 10
 early_stopping_threshold = 0.01
-lambda_dice = 0.5
+lambda_dice = 0.4187426704271407
+
+monitored_metric = 'MulticlassJaccardIndex'
 
 model = SAM(pretrained_path, 
             num_classes=num_classes, 
@@ -61,11 +61,11 @@ model = SAM(pretrained_path,
 
 transforms = v2.Compose([v2.RandomRotation(degrees=180)])
 root, annFile = '../data/train', '../data/annotations/train.json'
-trainset = SAMDataset(root, annFile, image_size, transforms=transforms, means=[-1.8163, -1.9570, -1.7297], stds=[0.8139, 0.4834, 0.4621])
+trainset = SAMDataset(root, annFile, image_size, transforms=transforms)
 trainloader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True, worker_init_fn=seed_worker, generator=generator)
 
 root, annFile = '../data/val', '../data/annotations/val.json'
-valset = SAMDataset(root, annFile, image_size, means=[-1.8168, -1.9573, -1.7303], stds=[0.8127, 0.4824, 0.4602])
+valset = SAMDataset(root, annFile, image_size)
 valloader = DataLoader(valset, batch_size=args.batch_size, shuffle=False, worker_init_fn=seed_worker, generator=generator)
 
 metric = MetricCollection([Accuracy(task='multiclass', num_classes=num_classes, average='macro'), 

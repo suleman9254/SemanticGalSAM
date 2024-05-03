@@ -6,11 +6,11 @@ def fetch_lora_regex(layers):
     
     if layers == 'vision_encoder':
         lora_layers = r'^vision_encoder\.layers.*(attn\.qkv).*'
-        normal_layers = r'^(mask_decoder|prompt_encoder).*?(weight|bias)$'
+        normal_layers = r'^mask_decoder.*?(weight|bias)$'
     
     elif layers == 'vision_encoder_mask_decoder':
         lora_layers = r'^vision_encoder\.layers.*(attn\.qkv).*|^mask_decoder\.transformer.*(?:self_attn\.(v|q)_proj|cross_attn_token_to_image\.(q|v)_proj|cross_attn_image_to_token\.(q|v)_proj|final_attn_token_to_image\.(q|v)_proj).*'
-        normal_layers = r'^prompt_encoder.*?(weight|bias)$'
+        normal_layers = r'(?![\s\S])'
 
     return lora_layers, normal_layers
 
